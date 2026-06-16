@@ -1,6 +1,4 @@
 name: Build Windows Installer
-
-# Run automatically on every push, and let you trigger it by hand from the Actions tab.
 on:
   push:
   workflow_dispatch:
@@ -9,22 +7,14 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - name: Check out the project
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build the Windows installer
-        run: npm run dist:win
-
-      - name: Upload the .exe installer
-        uses: actions/upload-artifact@v4
+      - run: npm install
+      - run: npm run dist:win
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: World-Cup-2026-Bracket-Windows-Installer
           path: dist/*.exe
