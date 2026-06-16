@@ -168,6 +168,12 @@ a{color:inherit;}
 .proj-title{font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:18px;
   letter-spacing:.08em;text-transform:uppercase;color:#ce93d8;}
 .proj-sub{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.5;}
+.proj-status{display:inline-block;font-family:'Barlow Condensed',sans-serif;font-weight:800;
+  font-size:11px;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:10px;
+  cursor:pointer;vertical-align:middle;margin-left:6px;user-select:none;transition:.15s;}
+.proj-status.live{color:#69f0ae;background:rgba(105,240,174,.12);}
+.proj-status.upd{color:var(--gold);background:rgba(245,196,81,.14);}
+.proj-status.off{color:var(--muted);background:rgba(255,255,255,.06);}
 .proj-tablewrap{background:var(--surface);border:1px solid var(--border);border-radius:10px;
   overflow:hidden;}
 .proj-table{width:100%;border-collapse:collapse;}
@@ -337,8 +343,8 @@ a{color:inherit;}
 <div id="projection" style="display:none;">
   <div class="proj-wrap">
     <div class="proj-head">
-      <div class="proj-title">📊 Tournament Projection</div>
-      <div class="proj-sub">Based on <span id="proj-n">10,000</span> simulated tournaments · Poisson model weighted by team strength · any group scores you've entered are held fixed</div>
+      <div class="proj-title">📊 Tournament Projection <span id="proj-status" class="proj-status live" title="Click to pause/resume live updates">● live</span></div>
+      <div class="proj-sub">Based on <span id="proj-n">10,000</span> simulated tournaments · updates automatically as you edit scores · any results you've entered are held fixed</div>
     </div>
     <div class="proj-tablewrap">
       <table class="proj-table">
@@ -1132,7 +1138,7 @@ function renderGroups(){
         <td>${row.ga}</td>
         <td class="td-gd ${gdCls}">${row.gd>0?"+"+row.gd:row.gd}</td>
         <td class="td-pts">${row.pts}</td>
-        ${proj?`<td class="td-adv">${pctTxt(proj.byTeam[row.name].qual)}</td>`:''}`;
+        ${proj?`<td class="td-adv" data-adv="${row.name}">${pctTxt(proj.byTeam[row.name].qual)}</td>`:''}`;
       tbody.appendChild(tr);
     });
     tbl.appendChild(tbody);
@@ -1371,16 +1377,16 @@ function predictLikely(){
   const st3=ORDER.map(g=>({g,rank:STR[calcStandings(g)[2].name]}));
   st3.sort((a,b)=>a.rank-b.rank);
   thirds=new Set(st3.slice(0,8).map(x=>x.g));
-  ko={};decideKO("predict");render();
+  ko={};decideKO("predict");render();scheduleProjection();
 }
 function randomize(){
   genGroupScores("rand");
   const p=[...ORDER];shuffle(p);thirds=new Set(p.slice(0,8));
-  ko={};decideKO("rand");render();
+  ko={};decideKO("rand");render();scheduleProjection();
 }
 function resetAll(){
   ORDER.forEach(g=>gscores[g]=Array(6).fill(null));
-  thirds=new Set();ko={};proj=null;render();
+  thirds=new Set();ko={};proj=null;projLive=false;clearTimeout(projTimer);render();
   document.getElementById("projection").style.display="none";
   window.scrollTo({top:0,behavior:"smooth"});
 }
@@ -1449,21 +1455,59 @@ function simulateOnce(stat){
     else if(id<=102)stat[w].fin++;else if(id===103)stat[w].bronze++;else stat[w].champ++;
   }
 }
+let projLive=false;     // when true, odds auto-refresh as scores change
+let projTimer=null;     // debounce timer
+
+function runSim(N){
+  const stat={};STR_ORDER.forEach(n=>stat[n]={p1:0,p2:0,p3:0,p4:0,q3:0,qual:0,r16:0,qf:0,sf:0,fin:0,champ:0,bronze:0});
+  for(let i=0;i<N;i++)simulateOnce(stat);
+  return stat;
+}
 function projectOdds(){
+  // Explicit run from the button: compute, show the panel, and switch live on.
+  const firstTime = !proj;
   const note=document.getElementById("save-note");
   note.textContent="Simulating 10,000 tournaments…";
-  // let the note paint before the heavy loop
   setTimeout(()=>{
-    const N=10000;
-    const stat={};STR_ORDER.forEach(n=>stat[n]={p1:0,p2:0,p3:0,p4:0,q3:0,qual:0,r16:0,qf:0,sf:0,fin:0,champ:0,bronze:0});
-    for(let i=0;i<N;i++)simulateOnce(stat);
-    proj={N,byTeam:stat};
+    proj={N:10000,byTeam:runSim(10000)};
+    projLive=true;
     note.textContent="";
     renderProjection();
-    renderGroups();        // refresh Adv% column
-    document.getElementById("projection").style.display="block";
-    document.getElementById("projection").scrollIntoView({behavior:"smooth",block:"start"});
+    renderGroups();        // (re)build the Adv% column
+    const panel=document.getElementById("projection");
+    panel.style.display="block";
+    if(firstTime) panel.scrollIntoView({behavior:"smooth",block:"start"});
   },30);
+}
+// Debounced live refresh — fires shortly after the user stops editing scores.
+function scheduleProjection(){
+  if(!projLive)return;
+  setProjStatus("updating");
+  clearTimeout(projTimer);
+  projTimer=setTimeout(()=>{
+    proj={N:10000,byTeam:runSim(10000)};
+    renderProjection();
+    updateAdvCells();      // patch group-card Adv% in place (no focus steal)
+    setProjStatus("live");
+  },350);
+}
+function setProjStatus(state){
+  const el=document.getElementById("proj-status");if(!el)return;
+  if(state==="updating"){el.textContent="● updating…";el.className="proj-status upd";}
+  else if(state==="live"){el.textContent="● live";el.className="proj-status live";}
+  else{el.textContent="○ paused";el.className="proj-status off";}
+}
+function toggleProjLive(){
+  projLive=!projLive;
+  setProjStatus(projLive?"live":"off");
+  if(projLive)scheduleProjection();
+}
+function updateAdvCells(){
+  if(!proj)return;
+  document.querySelectorAll("[data-adv]").forEach(td=>{
+    const s=proj.byTeam[td.dataset.adv];
+    if(s)td.textContent=pctTxt(s.qual);
+  });
 }
 function pctTxt(x){ if(!proj)return"–"; const p=100*x/proj.N; if(p>=99.5)return">99%"; if(p<0.5&&p>0)return"<1%"; return Math.round(p)+"%"; }
 function renderProjection(){
@@ -1573,6 +1617,7 @@ document.addEventListener("input",e=>{
   if(side==="H")gscores[g][mi].sH=inp.value;
   else gscores[g][mi].sA=inp.value;
   sanitizeKO();render();
+  scheduleProjection();
   // Restore focus to the input after re-render
   setTimeout(()=>{
     const el=document.querySelector(`.score-inp[data-g="${g}"][data-mi="${mi}"][data-side="${side}"]`);
@@ -1581,7 +1626,7 @@ document.addEventListener("input",e=>{
 });
 document.addEventListener("click",e=>{
   const gc=e.target.closest(".grp-clr");
-  if(gc){gscores[gc.dataset.g]=Array(6).fill(null);sanitizeKO();render();return;}
+  if(gc){gscores[gc.dataset.g]=Array(6).fill(null);sanitizeKO();render();scheduleProjection();return;}
   const chip=e.target.closest(".chip");
   if(chip&&!chip.classList.contains("dis")){clickThird(chip.dataset.g);return;}
   // KO card click (not on an input)
@@ -1597,6 +1642,7 @@ document.addEventListener("keydown",e=>{
 });
 document.getElementById("btn-predict").onclick=predictLikely;
 document.getElementById("btn-project").onclick=projectOdds;
+document.getElementById("proj-status").onclick=toggleProjLive;
 document.getElementById("btn-rnd").onclick=randomize;
 document.getElementById("btn-rst").onclick=resetAll;
 document.getElementById("btn-export").onclick=exportState;
